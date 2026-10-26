@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Papyrus Text Replacer</title>
+  <meta name="description" content="Detect text in any image with in-browser OCR and re-render it in the Papyrus font. 100% client-side — no uploads, no API keys, no backend." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23b4552d'/%3E%3Ctext%20x='16'%20y='23'%20font-size='19'%20text-anchor='middle'%20fill='%23fffdf7'%20font-family='Georgia,serif'%20font-style='italic'%20font-weight='bold'%3EP%3C/text%3E%3C/svg%3E" />
+  <!-- Papyrus webfont (falls back to locally installed Papyrus first, then cursive) -->
+  <link rel="preconnect" href="https://fonts.cdnfonts.com" crossorigin />
+  <link href="https://fonts.cdnfonts.com/css/papyrus" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-title">Papyrus Text Replacer</span>
+      <span class="brand-sub">In-browser OCR &middot; no uploads &middot; no API keys</span>
+    </div>
+    <div id="fontChip" class="chip chip-pending" title="Status of the Papyrus webfont">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="fontChipText">Checking Papyrus font&hellip;</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ Upload stage ============ -->
+    <section id="stageUpload" class="card">
+      <div id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="Upload an image: drop a file here, or press Enter to browse">
+        <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 16V4m0 0l-4.5 4.5M12 4l4.5 4.5" />
+          <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+        </svg>
+        <p class="dz-title">Drop an image here</p>
+        <p class="dz-sub">or click to browse &mdash; PNG, JPG or WEBP &middot; you can also paste with Ctrl&nbsp;/&nbsp;&#8984;+V</p>
+      </div>
+      <p class="fineprint">Everything runs locally in your browser &mdash; your image never leaves your device. OCR is English-only in v1. Try it with the bundled <strong>sample.png</strong>.</p>
+      <noscript><p class="fineprint" style="color:#bf3535">This app requires JavaScript.</p></noscript>
+    </section>
+
+    <!-- ============ Work stage ============ -->
+    <section id="stageWork" class="stack" hidden>
+      <!-- Options -->
+      <div class="card options-bar">
+        <div class="opt">
+          <label for="confSlider">Min. confidence: <span id="confValue">60</span>%</label>
+          <input type="range" id="confSlider" min="0" max="100" step="5" value="60" />
+        </div>
+        <div class="opt">
+          <span class="opt-label" id="granLabel">Replace per</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="granLabel">
+            <label>
+              <input type="radio" name="gran" value="word" id="modeWord" checked />
+              <span>Word</span>
+            </label>
+            <label>
+              <input type="radio" name="gran" value="line" id="modeLine" />
+              <span>Line</span>
+            </label>
+          </div>
+        </div>
+        <div class="opt">
+          <label for="fontSelect">Font</label>
+          <select id="fontSelect" title="Other fonts use whatever your operating system provides">
+            <option value="'Papyrus', cursive" selected>Papyrus</option>
+            <option value="'Comic Sans MS', cursive">Comic Sans MS</option>
+            <option value="'Curlz MT', cursive">Curlz MT</option>
+            <option value="'Bradley Hand', cursive">Bradley Hand</option>
+            <option value="cursive">Browser cursive</option>
+          </select>
+        </div>
+        <div class="opt opt-actions">
+          <button id="reRunBtn" class="btn btn-ghost" type="button" title="Re-run the replacement with the current settings">Re-render</button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="card progress-card" id="progressCard" hidden>
+        <div class="progress-head">
+          <span id="progressLabel">Preparing&hellip;</span>
+          <span id="progressPct"></span>
+        </div>
+        <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
+      </div>
+
+      <!-- No-text note -->
+      <div id="noTextNote" class="card note note-warn" hidden>
+        <strong>No text detected in this image.</strong>
+        Try a sharper, higher-resolution image, or lower the minimum confidence threshold and re-render.
+      </div>
+
+      <!-- Comparison + actions -->
+      <div class="card compare-card">
+        <div class="compare-grid">
+          <figure>
+            <figcaption>Original</figcaption>
+            <div class="frame"><img id="origImg" alt="Original image" /></div>
+          </figure>
+          <figure>
+            <figcaption>Papyrus result</figcaption>
+            <div class="frame frame-result"><canvas id="resultCanvas" role="img" aria-label="Image with text replaced in Papyrus font"></canvas></div>
+          </figure>
+        </div>
+        <div class="actions">
+          <button id="downloadBtn" class="btn btn-primary" type="button" disabled>Download PNG</button>
+          <button id="resetBtn" class="btn btn-ghost" type="button">Start over</button>
+          <span id="dimsNote" class="dims-note" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <!-- Editor -->
+      <details id="editorDetails" class="card editor" hidden>
+        <summary>Detected text (<span id="detCount">0</span>) &mdash; review &amp; edit before rendering</summary>
+        <p class="hint">Edit any text, untick detections you want to skip, then apply. Rendering always starts from the original image, so experimenting is safe. Switching between Word and Line rebuilds this list.</p>
+        <div id="editorList" class="editor-list"></div>
+        <button id="applyEditsBtn" class="btn" type="button">Apply &amp; re-render</button>
+      </details>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Built with <a href="https://github.com/naptha/tesseract.js" target="_blank" rel="noopener noreferrer">Tesseract.js</a> (OCR) and the HTML5 Canvas API. The Papyrus webfont is loaded from a public CDN; if it is unavailable, a cursive fallback is used. OCR supports English only in v1.</span>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden />
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
